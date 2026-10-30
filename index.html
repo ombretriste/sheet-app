@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <title>SheetCTRL</title>
+  <meta name="description" content="Hojas de cálculo sencillas con las fórmulas de siempre, compatibles con archivos .xlsx de Excel." />
+  <meta name="theme-color" content="#07120b" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="SheetCTRL" />
+  <meta name="color-scheme" content="dark light" />
+  <link rel="stylesheet" href="styles.css" />
+  <script>
+    // Aplica tema y fondo antes de pintar (evita un destello del tema equivocado)
+    try {
+      var d = JSON.parse(localStorage.getItem('sheet:display') || '{}');
+      var light = d.theme === 'light' || (d.theme !== 'dark' && matchMedia('(prefers-color-scheme: light)').matches);
+      document.documentElement.dataset.theme = light ? 'light' : 'dark';
+      document.documentElement.dataset.wall = d.wall || 'hoja';
+    } catch (e) {}
+  </script>
+</head>
+<body class="booting">
+  <!-- Pantalla de inicio -->
+  <div id="splash" class="splash">
+    <div class="sp-main">
+      <span class="logo-slot" data-logo="132"></span>
+      <div class="wordmark">
+        <span class="wm-name">Sheet<b>CTRL</b></span>
+        <span class="wm-by">by OmT Finance</span>
+      </div>
+    </div>
+    <p class="sp-version" id="app-version"></p>
+  </div>
+
+  <!-- Lista de libros -->
+  <div id="app" class="app">
+    <header class="topbar">
+      <div class="brand-wrap">
+        <span class="logo-slot" data-logo="30"></span>
+        <span class="brand">Sheet<b>CTRL</b></span>
+      </div>
+      <button id="menu-btn" class="icon-btn" aria-label="Más opciones" title="Más opciones" aria-haspopup="menu" aria-expanded="false">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><g fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></g></svg>
+      </button>
+    </header>
+    <main id="view"></main>
+  </div>
+
+  <!-- Editor -->
+  <section id="editor" class="editor" hidden aria-label="Hoja de cálculo">
+    <header class="ed-top">
+      <button id="back-btn" class="icon-btn" aria-label="Volver a los libros" title="Volver a los libros">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+      </button>
+      <div class="ed-title">
+        <input id="book-name" aria-label="Nombre del libro" maxlength="80" autocomplete="off" />
+        <span id="save-state" role="status"></span>
+      </div>
+      <button id="save-btn" class="ed-save" title="Exportar a .xlsx">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5"/><path d="M5 15v3.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V15"/></svg>
+        <span>.xlsx</span>
+      </button>
+      <button id="ed-menu-btn" class="icon-btn" aria-label="Más opciones" title="Más opciones" aria-haspopup="menu" aria-expanded="false">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><g fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></g></svg>
+      </button>
+    </header>
+    <div id="tools" class="tools" role="toolbar" aria-label="Formato"></div>
+    <div class="fbar">
+      <input id="namebox" aria-label="Casilla activa" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+      <span class="fx-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20c1.500 0 2-1 2.300-2.500L14 7c.3-1.500 1-3 2.500-3M8.500 10H16"/></svg></span>
+      <textarea id="fx" rows="1" aria-label="Contenido de la casilla" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+    </div>
+    <div id="grid-wrap" class="grid-wrap">
+      <canvas id="grid" aria-hidden="true"></canvas>
+      <div id="scroller"><div id="sizer"></div></div>
+      <div id="fill-box" class="fill-box" hidden></div>
+      <textarea id="cell-edit" rows="1" hidden aria-label="Editar casilla" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+    </div>
+    <div id="quick" class="quick" hidden>
+      <button type="button" data-k="no" aria-label="Cancelar">✕</button>
+      <button type="button" data-k="=">=</button>
+      <button type="button" data-k="(">(</button>
+      <button type="button" data-k=")">)</button>
+      <button type="button" data-k=";">;</button>
+      <button type="button" data-k=":">:</button>
+      <button type="button" data-k="+">+</button>
+      <button type="button" data-k="-">-</button>
+      <button type="button" data-k="*">*</button>
+      <button type="button" data-k="/">/</button>
+      <button type="button" data-k="&quot;">"</button>
+      <button type="button" data-k="$">$</button>
+      <button type="button" data-k="%">%</button>
+      <button type="button" data-k="ok" class="q-ok" aria-label="Aceptar">✓</button>
+    </div>
+    <footer class="tabs">
+      <button id="add-sheet" class="tab-add" aria-label="Añadir hoja" title="Añadir hoja">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <div id="tab-list"></div>
+      <span id="sel-stats" role="status"></span>
+      <div class="zoom">
+        <button id="zoom-out" aria-label="Alejar">−</button>
+        <span id="zoom-label">100 %</span>
+        <button id="zoom-in" aria-label="Acercar">+</button>
+      </div>
+    </footer>
+  </section>
+
+  <input id="file-input" type="file" accept=".xlsx,.xlsm,.xls,.csv,.tsv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" hidden />
+  <div id="assist" class="assist" hidden></div>
+  <div id="pop" class="pop" hidden></div>
+  <div id="menu" class="menu" role="menu" hidden></div>
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <!-- Vercel Web Analytics: sin cookies; solo visitas y las funciones que se abren. Se quita de la
+       dirección todo lo que va tras ? o # para que nunca se envíe. -->
+  <script>
+    window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
+    window.va('beforeSend', function (e) { return Object.assign({}, e, { url: e.url.split(/[?#]/)[0] }); });
+  </script>
+  <script defer src="/_vercel/insights/script.js"></script>
+  <script src="engine.js"></script>
+  <script src="xlsx.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
