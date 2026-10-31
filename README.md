@@ -1,9 +1,9 @@
 # SheetCTRL
 
-Versión 0.1.0 · by OmT Finance
+Versión 0.2.0 · by OmT Finance
 
 App web (PWA) de hojas de cálculo sencillas, compatible con archivos `.xlsx` de Excel. Mismo estilo que
-las demás apps de OmT Finance, en verde hoja. Sin servidor: los libros se guardan en el dispositivo.
+las demás apps de OmT Finance, en verde hoja. Los libros se guardan en el dispositivo y, con una cuenta de CloudCTRL (⋯ → Nube), también en la nube, cifrados. `cloud.js` es una copia del de cloudctrl.
 
 ## Qué hace
 

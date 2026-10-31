@@ -1,7 +1,7 @@
 'use strict';
 
 // Versión de la app (se ve en la pantalla de inicio). Arreglos y ajustes: 0.1.x; novedades: 0.x.0.
-const APP_VERSION = '0.1.0';
+const APP_VERSION = '0.2.0';
 // Uso de la app en Vercel Analytics: es una sola página, así que cada función se cuenta como una
 // página virtual. Solo se envía el nombre de la función, nunca datos de las hojas.
 const track = (path) => { try { window.va?.('pageview', { path }); } catch (_) { /* sin analítica */ } };
@@ -11,6 +11,7 @@ const INSTALL_HINT_KEY = 'sheet:installHint';
 const LOCALE = 'es-ES';
 
 const ICONS = {
+  cloud: '<path d="M7 18.5h9.5a4 4 0 0 0 .8-7.9 5.8 5.8 0 0 0-11.1-1.5A4.8 4.8 0 0 0 7 18.5z"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   upload: '<path d="M12 15V4M7.5 8.5L12 4l4.5 4.5"/><path d="M5 14v4.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V14"/>',
   download: '<path d="M12 4v11M7.5 10.5L12 15l4.5-4.5"/><path d="M5 15v3.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V15"/>',
@@ -110,6 +111,46 @@ const listBooks = () => idb('meta', 'readonly', (s) => s.getAll());
 const getBook = (id) => idb('books', 'readonly', (s) => s.get(id));
 const putBook = (id, meta, data) => idb(['meta', 'books'], 'readwrite', ([m, b]) => { m.put({ id, ...meta }); b.put({ id, data }); });
 const delBook = (id) => idb(['meta', 'books'], 'readwrite', ([m, b]) => { m.delete(id); b.delete(id); });
+
+// Nube (CloudCTRL): opcional; el cliente está en cloud.js
+const CLOUD_DELAY_MS = 6000;
+const cloudAdapter = {
+  kind: 'sheet',
+  list: async () => (await listBooks()).map((b) => ({ id: b.id, upd: b.updated })),
+  read: async (id) => {
+    const [meta, row] = await Promise.all([listBooks().then((l) => l.find((b) => b.id === id)), getBook(id)]);
+    return { name: meta.name, payload: row.data };
+  },
+  write: (id, name, data, upd) => putBook(id, { name, updated: upd, sheets: data.sheets.length }, data),
+  remove: delBook,
+  fork: async (id) => {
+    const [meta, row] = await Promise.all([listBooks().then((l) => l.find((b) => b.id === id)), getBook(id)]);
+    const name = `${meta.name} (otra versión)`;
+    await putBook(uid(), { name, updated: Date.now(), sheets: meta.sheets }, { ...row.data, name });
+  },
+  busy: (id) => !!wb && bookId === id,
+  done: (s) => {
+    if (s.forked) toast('Había dos versiones de un libro: se han guardado las dos', { warn: true });
+    if (s.tooLarge) toast('Un libro es demasiado grande para la nube', { warn: true });
+    if (wb) return;
+    if (s.down || s.removed || s.forked) renderHome();
+    else updateCloudNote();
+  },
+};
+function cloudNoteText() {
+  if (!Cloud.account) return 'Se guardan en este dispositivo.';
+  if (Cloud.status.state === 'error') return `${Cloud.status.error} Tus libros siguen en este dispositivo.`;
+  return 'Se guardan aquí y en tu nube, cifrados.';
+}
+function updateCloudNote() {
+  if ($('cloud-note')) $('cloud-note').textContent = cloudNoteText();
+}
+function openCloudSheet() {
+  Cloud.accountSheet(newSheet(true), {
+    title: 'libros', close: closeSheet, adapter: cloudAdapter, esc,
+    onChange: () => { if (!wb) renderHome(); },
+  });
+}
 
 function serializeWb(w) {
   return {
@@ -747,13 +788,17 @@ async function flush() {
   try {
     await putBook(bookId, { name: wb.name, updated: Date.now(), sheets: wb.sheets.length }, data);
     $('save-state').textContent = 'Guardado';
+    Cloud.schedule(cloudAdapter, CLOUD_DELAY_MS);
   } catch (_) {
     dirty = true;
     $('save-state').textContent = 'Sin guardar';
     toast('No se ha podido guardar: el dispositivo no tiene espacio', { warn: true });
   }
 }
-document.addEventListener('visibilitychange', () => { if (document.hidden) flush(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) flush();
+  Cloud.schedule(cloudAdapter, document.hidden ? 0 : 300);
+});
 window.addEventListener('pagehide', flush);
 
 // ---------- Escribir en casillas ----------
@@ -2111,7 +2156,7 @@ async function renderHome() {
   try { list = await listBooks(); } catch (_) { toast('Este navegador no permite guardar libros', { warn: true }); }
   list.sort((a, b) => b.updated - a.updated);
   $('view').innerHTML = `
-    <section class="intro"><p class="intro-text">Hojas de cálculo sencillas, con las fórmulas de siempre y compatibles con Excel. Se guardan en este dispositivo.</p></section>
+    <section class="intro"><p class="intro-text">Hojas de cálculo sencillas, con las fórmulas de siempre y compatibles con Excel. <span id="cloud-note">${cloudNoteText()}</span></p></section>
     <div class="home-actions">
       <button type="button" class="big-btn primary" id="new-book">${icon('plus', 20)}Nuevo libro</button>
       <button type="button" class="big-btn" id="open-file">${icon('upload', 20)}Abrir archivo</button>
@@ -2171,14 +2216,20 @@ function confirmDeleteBook(meta) {
   back.innerHTML = `
     <div class="sheet" role="dialog" aria-modal="true" aria-label="Eliminar libro">
       <h2 class="sheet-title">¿Eliminar «${esc(meta.name)}»?</h2>
-      <p class="small muted">Se borra de este dispositivo y no se puede recuperar.</p>
+      <p class="small muted">${Cloud.account ? 'Se quita de todos tus dispositivos. Podrás recuperarlo durante 30 días desde la papelera de CloudCTRL.' : 'Se borra de este dispositivo y no se puede recuperar.'}</p>
       <div class="sheet-actions">
         <button type="button" class="ghost-btn" data-close>Cancelar</button>
         <button type="button" class="done-btn danger-fill" data-ok>Eliminar</button>
       </div>
     </div>`;
   back.querySelector('[data-close]').addEventListener('click', closeSheet);
-  back.querySelector('[data-ok]').addEventListener('click', async () => { await delBook(meta.id); closeSheet(); renderHome(); });
+  back.querySelector('[data-ok]').addEventListener('click', async () => {
+    await delBook(meta.id);
+    Cloud.forget('sheet', meta.id);
+    closeSheet();
+    renderHome();
+    Cloud.schedule(cloudAdapter, 0);
+  });
 }
 function emptyWorkbook(name) { return { name, sheets: [newSheetData('Hoja1')], names: {}, styles: [{}] }; }
 async function createBook() {
@@ -2224,7 +2275,8 @@ async function closeEditor() {
   $('editor').hidden = true;
   $('app').hidden = false;
   document.body.classList.remove('editing');
-  renderHome();
+  await renderHome();
+  Cloud.schedule(cloudAdapter, 0);
 }
 // Abrir archivos
 async function importFile(file) {
@@ -2320,6 +2372,7 @@ const menuItems = () => (wb ? [
 ] : [
   { label: 'Nuevo libro', icon: 'plus', run: createBook },
   { label: 'Abrir archivo', icon: 'upload', run: () => $('file-input').click() },
+  { label: 'Nube', icon: 'cloud', run: openCloudSheet },
   { label: 'Opciones de visualización', icon: 'palette', run: openDisplaySheet },
   { label: 'Información', icon: 'info', run: openInfoSheet },
 ]);
@@ -2359,7 +2412,7 @@ function openInfoSheet() {
       <h2 class="sheet-title">SheetCTRL</h2>
       <p class="small muted">Versión ${APP_VERSION} · by OmT Finance</p>
       <p class="small">Hojas de cálculo con ${FN_DOC.length} funciones en español, que abre y guarda archivos .xlsx de Excel y .csv.</p>
-      <p class="small muted">Tus libros se guardan solo en este dispositivo: nada se envía a ningún servidor.</p>
+      <p class="small muted">${Cloud.account ? 'Tus libros se guardan en este dispositivo y en tu nube de CloudCTRL, cifrados.' : 'Tus libros se guardan solo en este dispositivo. Para tenerlos en la nube, conéctate a CloudCTRL desde ⋯ → Nube.'}</p>
       <div class="sheet-actions"><button type="button" class="done-btn" data-close>Cerrar</button></div>
     </div>`;
   back.querySelector('[data-close]').addEventListener('click', closeSheet);
@@ -2643,7 +2696,11 @@ window.launchQueue?.setConsumer(async (params) => {
 buildToolbar();
 applyDisplay();
 navigator.storage?.persist?.().catch(() => {});
-renderHome();
+renderHome().then(async () => {
+  await Cloud.sync(cloudAdapter);
+  const wanted = new URLSearchParams(location.search).get('open'); // enlace desde CloudCTRL
+  if (wanted && !wb) openBook(wanted);
+});
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));

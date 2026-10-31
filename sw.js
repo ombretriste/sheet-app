@@ -1,11 +1,12 @@
 // Cambia la versión al modificar archivos para que los móviles descarguen la nueva versión
-const CACHE = 'sheet-v1';
+const CACHE = 'sheet-v2';
 const ASSETS = [
   './',
   'index.html',
   'styles.css',
   'engine.js',
   'xlsx.js',
+  'cloud.js',
   'app.js',
   'manifest.webmanifest',
   'icons/icon.svg',
