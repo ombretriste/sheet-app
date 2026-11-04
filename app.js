@@ -1,7 +1,7 @@
 'use strict';
 
 // Versión de la app (se ve en la pantalla de inicio). Arreglos y ajustes: 0.1.x; novedades: 0.x.0.
-const APP_VERSION = '0.2.0';
+const APP_VERSION = '0.2.1';
 // Uso de la app en Vercel Analytics: es una sola página, así que cada función se cuenta como una
 // página virtual. Solo se envía el nombre de la función, nunca datos de las hojas.
 const track = (path) => { try { window.va?.('pageview', { path }); } catch (_) { /* sin analítica */ } };
@@ -162,18 +162,74 @@ function serializeWb(w) {
     }),
   };
 }
+// Los libros que llegan de otro dispositivo (nube) o de una copia se validan al cargar: solo pasan
+// tipos, números y colores esperados, para que nada acabe interpretado como HTML o CSS.
+const SAFE_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const HEX = /^#[0-9a-f]{6}$/i;
+const BORDER_STYLES = new Set(['thin', 'medium', 'thick', 'dashed', 'dotted', 'double', 'hair', 'mediumDashed', 'dashDot', 'mediumDashDot', 'dashDotDot', 'slantDashDot']);
+const int = (v, max) => (Number.isInteger(v) && v >= 0 && v <= max ? v : null);
+const str = (v, max = 500) => (typeof v === 'string' ? v.slice(0, max) : '');
+function cleanStyle(s) {
+  const o = {};
+  if (!s || typeof s !== 'object') return o;
+  for (const k of ['b', 'i', 'u', 'st', 'wr']) if (s[k]) o[k] = 1;
+  if (Number.isFinite(s.fs) && s.fs >= 1 && s.fs <= 409) o.fs = s.fs;
+  if (typeof s.fn === 'string' && /^[\p{L}\p{N} ._-]{1,60}$/u.test(s.fn)) o.fn = s.fn;
+  if (HEX.test(s.fc)) o.fc = s.fc;
+  if (HEX.test(s.bg)) o.bg = s.bg;
+  if (['left', 'center', 'right'].includes(s.ha)) o.ha = s.ha;
+  if (['top', 'center'].includes(s.va)) o.va = s.va;
+  if (typeof s.nf === 'string') o.nf = s.nf.slice(0, 255);
+  if (s.bd && typeof s.bd === 'object') {
+    const bd = {};
+    for (const k of ['t', 'r', 'b', 'l']) {
+      const x = s.bd[k];
+      if (x && BORDER_STYLES.has(x.s)) bd[k] = { s: x.s, c: HEX.test(x.c) ? x.c : null };
+    }
+    if (Object.keys(bd).length) o.bd = bd;
+  }
+  return o;
+}
+function cleanValue(v) {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : undefined;
+  if (typeof v === 'string') return v.slice(0, 32767);
+  if (typeof v === 'boolean') return v;
+  if (isErr(v) && typeof v.e === 'string') return errOf(v.e.slice(0, 12));
+  return undefined;
+}
+function sizes(o, maxKey) {
+  const out = {};
+  if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) { const i = Number(k); if (int(i, maxKey) !== null && Number.isFinite(v) && v >= 0 && v <= 5000) out[i] = v; }
+  return out;
+}
 function restoreWb(d) {
-  const w = { name: d.name, styles: d.styles, names: d.names || {}, sheets: [] };
-  for (const s of d.sheets) {
-    const sh = { ...newSheetData(s.name), id: s.id, cols: { ...s.cols }, rows: { ...s.rows }, merges: s.merges.map((m) => ({ ...m })), freeze: { ...s.freeze }, hidden: s.hidden, defW: s.defW };
-    for (const [r, c, v, f, st] of s.cells) {
+  const styles = Array.isArray(d.styles) && d.styles.length ? d.styles.map(cleanStyle) : [{}];
+  styles[0] = styles[0] || {};
+  const names = {};
+  if (d.names && typeof d.names === 'object') for (const [k, v] of Object.entries(d.names)) if (/^[\p{L}_][\p{L}\p{N}_.]{0,254}$/u.test(k) && typeof v === 'string') names[k] = v.slice(0, 8192);
+  const w = { name: str(d.name, 80) || 'Libro', styles, names, sheets: [] };
+  for (const s of Array.isArray(d.sheets) ? d.sheets : []) {
+    const sh = newSheetData(str(s.name, 31).replace(/[\\/?*[\]:]/g, '') || `Hoja${w.sheets.length + 1}`);
+    if (SAFE_ID.test(s.id)) sh.id = s.id;
+    sh.cols = sizes(s.cols, MAX_COLS - 1);
+    sh.rows = sizes(s.rows, MAX_ROWS - 1);
+    sh.merges = (Array.isArray(s.merges) ? s.merges : []).filter((m) => m && [m.r1, m.r2].every((x) => int(x, MAX_ROWS - 1) !== null) && [m.c1, m.c2].every((x) => int(x, MAX_COLS - 1) !== null) && m.r1 <= m.r2 && m.c1 <= m.c2).map((m) => ({ r1: m.r1, c1: m.c1, r2: m.r2, c2: m.c2 }));
+    sh.freeze = { r: int(s.freeze?.r, 1000) ?? 0, c: int(s.freeze?.c, 1000) ?? 0 };
+    if (s.hidden) sh.hidden = true;
+    if (Number.isFinite(s.defW) && s.defW > 0 && s.defW <= 1000) sh.defW = s.defW;
+    for (const cell of Array.isArray(s.cells) ? s.cells : []) {
+      if (!Array.isArray(cell)) continue;
+      const [r, c, v, f, st] = cell;
+      if (int(r, MAX_ROWS - 1) === null || int(c, MAX_COLS - 1) === null) continue;
       const x = ensureCell(sh, r, c);
-      if (v !== undefined) x.v = v;
-      if (f !== undefined) x.f = f;
-      if (st) x.s = st;
+      const val = cleanValue(v);
+      if (val !== undefined) x.v = val;
+      if (typeof f === 'string') x.f = f.slice(0, 8192);
+      if (int(st, styles.length - 1)) x.s = st;
     }
     w.sheets.push(sh);
   }
+  if (!w.sheets.length) w.sheets.push(newSheetData('Hoja1'));
   return w;
 }
 
@@ -2164,11 +2220,11 @@ async function renderHome() {
     <p class="label">Tus libros</p>
     ${list.length ? `<div class="book-list">${list.map((b) => `
       <div class="book">
-        <button type="button" class="book-main" data-open="${b.id}">
+        <button type="button" class="book-main" data-open="${esc(b.id)}">
           <span class="book-icon">${icon('sheet', 22)}</span>
-          <span class="book-text"><b>${esc(b.name)}</b><small>${fmtDate(b.updated)} · ${b.sheets} ${b.sheets === 1 ? 'hoja' : 'hojas'}</small></span>
+          <span class="book-text"><b>${esc(b.name)}</b><small>${fmtDate(b.updated)} · ${Number(b.sheets) || 1} ${Number(b.sheets) === 1 ? 'hoja' : 'hojas'}</small></span>
         </button>
-        <button type="button" class="book-more" data-more="${b.id}" aria-label="Opciones de ${esc(b.name)}">${icon('chevron', 18)}</button>
+        <button type="button" class="book-more" data-more="${esc(b.id)}" aria-label="Opciones de ${esc(b.name)}">${icon('chevron', 18)}</button>
       </div>`).join('')}</div>` : '<p class="empty">Aún no hay ningún libro. Crea uno nuevo o abre un .xlsx.</p>'}`;
   $('new-book').addEventListener('click', () => { track('/nuevo'); createBook(); });
   $('open-file').addEventListener('click', () => $('file-input').click());

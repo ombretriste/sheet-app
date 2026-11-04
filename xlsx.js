@@ -115,7 +115,7 @@ function readColor(el, theme, isFont) {
     if (i >= 64) return null;
     hex = INDEXED[i];
   }
-  if (!hex) return null;
+  if (!hex || !/^[0-9A-F]{6}$/.test(hex)) return null;
   if (isFont && hex === '000000') return null;
   return `#${tinted(hex, Number(el.getAttribute('tint') || 0)).toLowerCase()}`;
 }

@@ -1,9 +1,10 @@
 // Cambia la versión al modificar archivos para que los móviles descarguen la nueva versión
-const CACHE = 'sheet-v2';
+const CACHE = 'sheet-v3';
 const ASSETS = [
   './',
   'index.html',
   'styles.css',
+  'boot.js',
   'engine.js',
   'xlsx.js',
   'cloud.js',
